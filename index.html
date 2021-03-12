@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta content="text/html;charset=utf-8" http-equiv="Content-Type">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+</head>
+<body>
+    <div>
+        mb_id : <input type="text" id="mb_id" style="width:300px;" value="n7apovtwdd912a91d767729e5dc08d6663367648" />
+        <button type="button" id="btn_start">시작</button>
+        <button type="button" id="btn_end">종료</button><br><br>
+
+        invitees : <input type="text" id="invitees_mb_id" style="width:300px;" value="qfydbzm6c327e9c321fb74caec530d36f2454532" />
+        <button type="button" id="btn_create_channel">방 만들기</button><br><br>
+
+        channel_id : <input type="text" id="channel_id" style="width:300px;" />
+        <button type="button" id="btn_enter_channel">입장</button>
+        <button type="button" id="btn_leave_channel">퇴장</button>
+        <button type="button" id="btn_delete_channel">삭제</button><br><br>
+
+        <input type="text" id="message" style="width:300px;" />
+        <button type="button" id="btn_send_message">메시지 전송</button>
+
+        <div id="div_channels" style="width:600px;height:300px;border:solid 1px #ddd;overflow-y:auto;"></div>
+        <div id="div_contents" style="width:600px;height:300px;border:solid 1px #ddd;overflow-y:auto;"></div>
+    </div>
+
+    <script src="https://unpkg.com/graphql.js@0.5.0/graphql.min.js"></script>
+    <script src="https://unpkg.com/apollo-client-browser@1.9.0"></script>
+    <script src="//cdn.jsdelivr.net/npm/subscriptions-transport-ws@0.9.18/browser/client.js"></script>
+    <script>
+        $(function() {
+            $('#btn_start').click(() => {
+                startGraphql();
+            });
+            $('#btn_end').click(() => {
+                endGraphql();
+            });
+            $('#btn_create_channel').click(() => {
+                createChannel();
+            });
+            $('#btn_delete_channel').click(() => {
+                deleteChannel();
+            });
+            $('#btn_enter_channel').click(() => {
+                enterChannel();
+            });
+            $('#btn_leave_channel').click(() => {
+                leaveChannel();
+            });
+           $('#btn_send_message').click(() => {
+               sendMessage();
+           });
+        });
+
+        var graph;
+        var apolloClient;
+        var subscriptionsClient;
+        var subChannels;
+        var subMessages;
+
+        function startGraphql() {
+            // n7apovtwdd912a91d767729e5dc08d6663367648
+            // qfydbzm6c327e9c321fb74caec530d36f2454532
+            var PHPSESSID = "1111111111111111"; //getCookie('PHPSESSID');
+            var MBID = $('#mb_id').val();
+
+            /***************************
+             * f/graphql.js usage
+             ***************************/
+            graph = graphql("http://localhost:4000/graphql", {
+                headers: {
+                    "mbid": MBID,
+                    "ssid": PHPSESSID
+                },
+                asJSON: true
+            });
+
+            /************************
+             * apollo client usage
+             ************************/
+            apolloClient = new Apollo.lib.ApolloClient({
+                networkInterface: Apollo.lib.createNetworkInterface({
+                    uri: 'http://localhost:4000/graphql',
+                    transportBatching: true,
+                }),
+                connectToDevTools: true,
+            });
+
+            /*********************
+             * subscription
+             ********************/
+            subscriptionsClient = new window.SubscriptionsTransportWs.SubscriptionClient('ws://localhost:4000/graphql', {
+                reconnect: true
+            });
+
+            subscriptionsClient.onConnected(() => {
+                console.log('subscriptionsClient Connected!!');
+            });
+
+            subscriptionsClient.onReconnected(() => {
+                console.log('subscriptionsClient Reconnected!!');
+            });
+
+            subscriptionsClient.onError(() => {
+                console.log('subscriptionsClient Error!!');
+            });
+
+            subscribeChannels();
+        }
+
+        function endGraphql() {
+            subscriptionsClient.close();
+        }
+
+        function subscribeChannels() {
+            const SUB_QUERY = Apollo.gql`subscription($mb_id: String!) {
+                updateChannel(mb_id: $mb_id) {
+                    type
+                    channel_id
+                    channel_title
+                    message_index
+                    opener_mb_id
+                    invitees_mb_id
+
+                    users {
+                        mb_id
+                        mb_nick
+                    }
+                    messages {
+                        index
+                        mb_id
+                        content
+                        date_created
+                    }
+                }
+            }`;
+
+            subChannels = subscriptionsClient.request({
+                query: SUB_QUERY,
+                variables: { "mb_id" : $('#mb_id').val() }
+            }).subscribe({
+                next: (res)=> {
+                    console.warn(res.data);
+                    let str_channel_id = res.data.updateChannel.channel_id;
+                    let str_messages = res.data.updateChannel.messages[0] ? res.data.updateChannel.messages[0].content : '등록된 글이 없습니다.';
+                    let str = `<div>[${str_channel_id}] :: ${str_messages}</div>`;
+
+                    $('#div_channels').prepend(str);
+                },
+                error: console.error
+            });
+
+            // let params = {};
+            // let payload = {};
+            // payload['extensions'] = {};
+            // payload['operationName'] = null;
+            // payload['query'] = `subscription($mb_id: String!) { updateChannel(mb_id: $mb_id) {
+            //     channel_id
+            //     channel_title
+            //     message_index
+            //     opener_mb_id
+            //     invitees_mb_id
+            //
+            //     users {
+            //         mb_id
+            //         mb_nick
+            //     }
+            //     messages {
+            //         index
+            //         mb_id
+            //         content
+            //         date_created
+            //     }
+            // } }`;
+            // payload['variables'] = { "mb_id" : $('#mb_id').val() };
+            //
+            // params['id'] = "1";
+            // params['payload'] = payload;
+            // params['type'] = "start";
+            // graphqlWebSocket.send(JSON.stringify(params));
+        }
+
+        function createChannel() {
+            graph(`mutation CreateChannel($input: ChannelInput!) {
+                    createChannel(input: $input) {
+                        id,
+                        channel_id,
+                        channel_type,
+                        is_active,
+                        date_created,
+                        date_last_update,
+                        message_index,
+                        opener_mb_id,
+                        invitees_mb_id
+                    }
+                }`, {
+                "input": {
+                    "channel_type": "OTO",
+                    "opener_mb_id": $('#mb_id').val(),
+                    "invitees_mb_id": $('#invitees_mb_id').val(),
+                }
+            })
+            .then(function (response) {
+                // response is originally response.data of query result
+                console.log(response)
+            }).catch(function (error) {
+                // response is originally response.errors of query result
+                console.log(error)
+            });
+        }
+
+        function deleteChannel() {
+            graph(`mutation DeleteChannel($id: ID!) {
+                    deleteChannel(id: $id) {
+                        id,
+                        channel_id,
+                        channel_type,
+                        is_active,
+                        date_created,
+                        date_last_update,
+                        message_index,
+                        opener_mb_id,
+                        invitees_mb_id
+                    }
+                }`, {
+                "id": $('#channel_id').val(),
+            })
+            .then(function (response) {
+                // response is originally response.data of query result
+                console.log(response)
+            }).catch(function (error) {
+                // response is originally response.errors of query result
+                console.log(error)
+            });
+        }
+
+        function sendMessage() {
+            graph(`mutation CreateMessage($input: MessageInput!) {
+                    createMessage(input: $input) {
+                        id,
+                        content,
+                        date_created
+                    }
+                }`, {
+                "input": {
+                    "channel_id": $('#channel_id').val(),
+                    "mb_id": $('#mb_id').val(),
+                    "content": $('#message').val()
+                }
+            })
+            .then(function (response) {
+                // response is originally response.data of query result
+                console.log(response)
+            }).catch(function (error) {
+                // response is originally response.errors of query result
+                console.log(error)
+            });
+        }
+
+        function enterChannel() {
+            const SUB_QUERY = Apollo.gql`subscription($channel_id: String!) {
+                updateMessage(channel_id: $channel_id) {
+                    type
+                    id
+                    index
+                    mb_id
+                    content
+                    date_created
+                }
+            }`;
+
+            subMessages = subscriptionsClient.request({
+                query: SUB_QUERY,
+                variables: { "channel_id" : $('#channel_id').val() }
+            }).subscribe({
+                next: (res)=> {
+                    console.warn(res.data);
+                    let str_mb_id = res.data.updateMessage.mb_id;
+                    let str_content = res.data.updateMessage.content;
+                    let str = `<div>${str_mb_id} :: ${str_content}</div>`;
+
+                    $('#div_contents').prepend(str);
+                },
+                error: console.error
+            });
+
+            // let params = {};
+            // let payload = {};
+            // payload['extensions'] = {};
+            // payload['operationName'] = null;
+            // payload['query'] = `subscription($channel_id: String!) { updateMessage(channel_id: $channel_id) { id index mb_id content date_created } }`;
+            // payload['variables'] = { "channel_id" : $('#channel_id').val() };
+            //
+            // params['id'] = "2";
+            // params['payload'] = payload;
+            // params['type'] = "start";
+            // graphqlWebSocket.send(JSON.stringify(params));
+        }
+
+        function leaveChannel() {
+            subMessages.unsubscribe();
+            $('#div_contents').html('');
+
+            // let params = {};
+            // let payload = {};
+            // payload['extensions'] = {};
+            // payload['operationName'] = null;
+            // payload['query'] = `subscription { updateMessage { content } }`;
+            // payload['variables'] = {};
+            //
+            // params['id'] = "2";
+            // params['payload'] = payload;
+            // params['type'] = "stop";
+            // graphqlWebSocket.send(JSON.stringify(params));
+            //
+            // $('#div_contents').html('');
+        }
+
+        function getCookie(name) {
+            var nameOfCookie = name + "=";
+            var x = 0;
+            while (x <= document.cookie.length) {
+                var y = (x + nameOfCookie.length);
+                if (document.cookie.substring(x, y) == nameOfCookie) {
+                    if ((endOfCookie = document.cookie.indexOf(";", y)) == -1)
+                    endOfCookie = document.cookie.length;
+                    return unescape(document.cookie.substring(y, endOfCookie));
+                }
+                x = document.cookie.indexOf(" ", x) + 1;
+                if (x == 0)
+                break;
+            }
+
+            return "";
+        }
+
+        // web-socket (graphql-ws)
+        // var graphqlWebSocket = new WebSocket("ws://localhost:4000/graphql", "graphql-ws");
+        //
+        // graphqlWebSocket.onopen = function (event) {
+        //     console.log(event);
+        //
+        //     let params = {};
+        //     params['type'] = "connection_init";
+        //     params['payload'] = {};
+        //     graphqlWebSocket.send(JSON.stringify(params));
+        // };
+        //
+        // graphqlWebSocket.onmessage = function (event) {
+        //     console.log(event.data);
+        //     let datas = JSON.parse(event.data);
+        //     if (datas && datas.type == "data") {
+        //         // 채널 업데이트 구독
+        //         if (datas.payload.data.updateChannel) {
+        //             let str_channel_id = datas.payload.data.updateChannel.channel_id;
+        //             let str_messages = datas.payload.data.updateChannel.messages[0] ? datas.payload.data.updateChannel.messages[0].content : '등록된 글이 없습니다.';
+        //             let str = `<div>[${str_channel_id}] :: ${str_messages}</div>`;
+        //             console.log(str);
+        //             $('#div_channels').prepend(str);
+        //         }
+        //         // 메시지 업데이트 구독
+        //         if (datas.payload.data.updateMessage) {
+        //             console.log(datas.payload.data.updateMessage.content);
+        //             let str_mb_id = datas.payload.data.updateMessage.mb_id;
+        //             let str_content = datas.payload.data.updateMessage.content;
+        //             let str = `<div>${str_mb_id} :: ${str_content}</div>`;
+        //             $('#div_contents').prepend(str);
+        //         }
+        //
+        //     }
+        // }
+        //
+        // graphqlWebSocket.onerror = function (err) {
+        //     console.log(err);
+        // }
+
+    </script>
+</body>
+</html>
